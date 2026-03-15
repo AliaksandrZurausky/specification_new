@@ -1,0 +1,56 @@
+body {
+  display: none;
+}
+/* Обертка формы в слайдере */
+#spec-create-form {
+  padding: 16px 18px;
+}
+
+/* Чуть компактнее строки формы */
+#spec-create-form .ui-layout-form-row {
+  margin-bottom: 14px;
+}
+
+/* Подписи полей: ровнее и контрастнее */
+#spec-create-form .ui-layout-form-label .ui-ctl-label-text,
+#spec-create-form .ui-ctl-label-text {
+  font-weight: 600;
+  color: #525c69;
+}
+
+/* Блок строк “Сырьё” */
+#spec-create-form #raw-list > div {
+  background: #ffffff;
+  border: 1px solid rgba(82, 92, 105, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+/* Кнопка удаления — чуть “мягче” */
+#spec-create-form #raw-list > div button.ui-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  line-height: 34px;
+}
+
+/* Нормальная ширина контролов в гриде строки сырья */
+#spec-create-form .ui-ctl-w100 .ui-ctl-element {
+  width: 100%;
+}
+
+/* Подсказки/алерты компактнее */
+#spec-create-form .ui-alert {
+  border-radius: 12px;
+}
+
+#spec-create-form .ui-alert .ui-alert-message {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* Кнопки внизу формы */
+#spec-create-form #save-btn,
+#spec-create-form #cancel-btn {
+  min-width: 140px;
+}

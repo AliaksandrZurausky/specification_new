@@ -1,19 +1,20 @@
 <?php
 /**
  * /local/specifications/edit/save_specification.php
- * Сохранение спецификации — расширенная версия с новыми полями этапа.
+ * Сохранение спецификации. Основные этапы — тип 615, альтернативы — тип 616.
  *
- * POST: sessid, headId, title, specId, steps (JSON)
+ * POST: sessid, headId, title, steps (JSON)
  *
- * Структура одного шага в steps[]:
- *   rowId   — int, 0=новый
- *   rawId   — int, ID элемента инфоблока (материал)
- *   qty     — float
- *   unit    — string (текст единицы)
- *   section — int, ID элемента инфоблока 26 (участок)
- *   desc    — string
- *   time    — int (минуты)
- *   alts    — array [{name,qty}]
+ * Структура steps[]:
+ * {
+ *   rowId: int (0=новый),
+ *   rawId: int (ID товара ИБ14),
+ *   qty:   float,
+ *   section: int (ID элемента ИБ26),
+ *   desc:  string,
+ *   time:  int,
+ *   alts: [{ rowId: int, rawId: int, qty: float }]
+ * }
  */
 
 use Bitrix\Main\Loader;
@@ -26,18 +27,14 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
 define('BX_SESSION_ID_CHANGE', false);
 header('Content-Type: application/json; charset=utf-8');
 
+const TYPE_MAIN = 615;
+const TYPE_ALT  = 616;
+
 function jsonOut(array $data, int $status = 200): void
 {
     http_response_code($status);
     echo Json::encode($data, JSON_UNESCAPED_UNICODE);
     die();
-}
-
-function normalizeActive($v): int
-{
-    if (is_array($v)) $v = $v[0] ?? null;
-    if ($v === true || (string)$v === 'Y' || (int)$v === 1) return 1;
-    return 0;
 }
 
 if (!check_bitrix_sessid()) {
@@ -48,10 +45,8 @@ if (!Loader::includeModule('crm')) {
     jsonOut(['ok' => false, 'error' => 'crm'], 500);
 }
 
-// ── Входные данные ────────────────────────────────────────────────────────────
-$headId  = (int)($_POST['headId']  ?? 0);
-$title   = trim((string)($_POST['title']  ?? ''));
-$specId  = (int)($_POST['specId']  ?? 0);
+$headId = (int)($_POST['headId'] ?? 0);
+$title  = trim((string)($_POST['title'] ?? ''));
 
 try {
     $incomingSteps = Json::decode((string)($_POST['steps'] ?? '[]'));
@@ -60,176 +55,213 @@ try {
     $incomingSteps = [];
 }
 
-if ($headId <= 0 || $title === '' || $specId <= 0) {
-    jsonOut(['ok' => false, 'error' => 'validate_head'], 400);
+if ($headId <= 0 || $title === '') {
+    jsonOut(['ok' => false, 'error' => 'validate'], 400);
 }
 
-// ── Фабрики ───────────────────────────────────────────────────────────────────
 $factoryHead = Container::getInstance()->getFactory(1142);
 $factoryRow  = Container::getInstance()->getFactory(1146);
-
-if (!$factoryHead || !$factoryRow) {
-    jsonOut(['ok' => false, 'error' => 'factory'], 500);
-}
+if (!$factoryHead || !$factoryRow) jsonOut(['ok' => false, 'error' => 'factory'], 500);
 
 $head = $factoryHead->getItem($headId);
-if (!$head) {
-    jsonOut(['ok' => false, 'error' => 'head_not_found', 'headId' => $headId], 404);
+if (!$head) jsonOut(['ok' => false, 'error' => 'head_not_found'], 404);
+
+// Текущие строки head (только основные)
+$existingIds = $head->get('UF_CRM_27_1751274867');
+if (!is_array($existingIds)) $existingIds = $existingIds ? [$existingIds] : [];
+$existingIds = array_values(array_filter(array_map('intval', $existingIds), fn($v) => $v > 0));
+
+// ── Вспомогательные функции ───────────────────────────────────────────────────
+
+function saveRow(
+    \Bitrix\Crm\Service\Factory $factory,
+    int $rowId,
+    int $headId,
+    int $type,
+    int $rawId,
+    float $qty,
+    int $section,
+    string $desc,
+    int $time,
+    string $altsJson
+): int
+{
+    $isNew = $rowId <= 0;
+    $item  = $isNew ? $factory->createItem() : $factory->getItem($rowId);
+    if (!$item) return 0;
+
+    $itemTitle = $desc !== '' ? mb_substr($desc, 0, 60) : ('Материал #' . $rawId);
+
+    $item->setTitle($itemTitle);
+    $item->set('UF_CRM_28_1752667325075', $type);          // тип: 615/616
+    $item->set('UF_CRM_28_1751274644',    (string)$rawId); // ID товара
+    $item->set('UF_CRM_28_1751274777',    $qty);           // количество
+    $item->set('UF_CRM_28_1773394604',    $section > 0 ? $section : null); // участок
+    $item->set('UF_CRM_28_1773394725',    $desc);          // описание
+    $item->set('UF_CRM_28_1773394804',    $time);          // время
+    $item->set('UF_CRM_28_1773394825',    $altsJson);      // JSON alt IDs
+
+    if (!$isNew) {
+        $item->set('UF_CRM_28_1752667276886', $headId);   // parentId
+    }
+
+    $op = $isNew
+        ? $factory->getAddOperation($item)
+        : $factory->getUpdateOperation($item);
+
+    $res = $op->launch();
+    if (!$res->isSuccess()) return 0;
+
+    return (int)$item->getId();
 }
 
-$activeNow = normalizeActive($head->get('UF_CRM_27_1767865292'));
-
-// ── Существующие строки ───────────────────────────────────────────────────────
-$existingRowIds = $head->get('UF_CRM_27_1751274867');
-if (!is_array($existingRowIds)) {
-    $existingRowIds = $existingRowIds ? [$existingRowIds] : [];
+function deleteRow(\Bitrix\Crm\Service\Factory $factory, int $rowId): void
+{
+    $item = $factory->getItem($rowId);
+    if ($item) $factory->getDeleteOperation($item)->launch();
 }
-$existingRowIds   = array_values(array_filter(array_map('intval', $existingRowIds), static fn($v) => $v > 0));
-$existingRowIdSet = array_fill_keys($existingRowIds, true);
 
-// ── Разбираем входящие шаги ───────────────────────────────────────────────────
-$incomingExistingIds = [];
-$validSteps          = [];
+// ── Обработка входящих шагов ─────────────────────────────────────────────────
+$finalMainIds = [];
 
+// Собираем все incoming основные rowId для определения удалённых
+$incomingMainIds = array_filter(array_map(
+    fn($s) => (int)($s['rowId'] ?? 0),
+    $incomingSteps
+), fn($v) => $v > 0);
+
+// Удаляем основные строки которых больше нет (и их альтернативы)
+foreach ($existingIds as $existId) {
+    if (!in_array($existId, $incomingMainIds, true)) {
+        // Загружаем чтобы удалить альтернативы
+        $oldItem = $factoryRow->getItem($existId);
+        if ($oldItem) {
+            $oldAltsJson = (string)$oldItem->get('UF_CRM_28_1773394825');
+            if ($oldAltsJson !== '') {
+                try {
+                    $oldAltIds = Json::decode($oldAltsJson);
+                    if (is_array($oldAltIds)) {
+                        foreach ($oldAltIds as $oldAltId) {
+                            deleteRow($factoryRow, (int)$oldAltId);
+                        }
+                    }
+                } catch (\Throwable $e) {}
+            }
+        }
+        deleteRow($factoryRow, $existId);
+    }
+}
+
+// Сохраняем шаги
 foreach ($incomingSteps as $step) {
     if (!is_array($step)) continue;
 
-    $rowId   = (int)($step['rowId']  ?? 0);
-    $rawId   = (int)($step['rawId']  ?? 0);
-    $qty     = (float)($step['qty']  ?? 0);
-    $unit    = trim((string)($step['unit']    ?? ''));
+    $rowId   = (int)($step['rowId']   ?? 0);
+    $rawId   = (int)($step['rawId']   ?? 0);
+    $qty     = (float)($step['qty']   ?? 0);
     $section = (int)($step['section'] ?? 0);
-    $desc    = trim((string)($step['desc']    ?? ''));
-    $time    = (int)($step['time']   ?? 0);
+    $desc    = trim((string)($step['desc'] ?? ''));
+    $time    = (int)($step['time']    ?? 0);
     $alts    = is_array($step['alts'] ?? null) ? $step['alts'] : [];
 
-    // Существующая строка с невалидными данными — ошибка
-    if ($rowId > 0 && ($rawId <= 0 || $qty <= 0)) {
-        jsonOut(['ok' => false, 'error' => 'validate_step', 'rowId' => $rowId], 400);
+    if ($rawId <= 0) continue;
+
+    // Сохраняем альтернативы сначала (нам нужны их ID для JSON)
+    $altIds = [];
+
+    // Текущие alt IDs из существующей строки (для определения удалённых)
+    $existingAltIds = [];
+    if ($rowId > 0) {
+        $existingMain = $factoryRow->getItem($rowId);
+        if ($existingMain) {
+            $existingAltsJson = (string)$existingMain->get('UF_CRM_28_1773394825');
+            if ($existingAltsJson !== '') {
+                try {
+                    $decoded = Json::decode($existingAltsJson);
+                    if (is_array($decoded)) {
+                        $existingAltIds = array_filter(array_map('intval', $decoded));
+                    }
+                } catch (\Throwable $e) {}
+            }
+        }
     }
 
-    // Новая пустая строка — пропускаем
-    if ($rowId <= 0 && ($rawId <= 0 || $qty <= 0)) continue;
+    $incomingAltIds = array_filter(array_map(
+        fn($a) => (int)($a['rowId'] ?? 0),
+        $alts
+    ), fn($v) => $v > 0);
 
-    // Нормализуем альтернативы
-    $cleanAlts = [];
+    // Удаляем альтернативы которых больше нет
+    foreach ($existingAltIds as $oldAltId) {
+        if (!in_array($oldAltId, $incomingAltIds, true)) {
+            deleteRow($factoryRow, $oldAltId);
+        }
+    }
+
+    // Сохраняем/создаём альтернативы
     foreach ($alts as $alt) {
         if (!is_array($alt)) continue;
-        $altName = trim((string)($alt['name'] ?? ''));
-        $altQty  = (float)($alt['qty'] ?? 0);
-        if ($altName !== '') {
-            $cleanAlts[] = ['name' => $altName, 'qty' => $altQty];
+        $altRowId = (int)($alt['rowId'] ?? 0);
+        $altRawId = (int)($alt['rawId'] ?? 0);
+        $altQty   = (float)($alt['qty'] ?? 0);
+
+        if ($altRawId <= 0) continue;
+
+        $savedAltId = saveRow(
+            $factoryRow,
+            $altRowId,
+            $headId,
+            TYPE_ALT,
+            $altRawId,
+            $altQty,
+            0,   // section у альтернативы не нужен
+            '',  // desc у альтернативы не нужен
+            0,   // time у альтернативы не нужен
+            '[]'
+        );
+
+        if ($savedAltId > 0) $altIds[] = $savedAltId;
+    }
+
+    $altsJson = Json::encode($altIds, JSON_UNESCAPED_UNICODE);
+
+    // Сохраняем основную строку
+    $savedMainId = saveRow(
+        $factoryRow,
+        $rowId,
+        $headId,
+        TYPE_MAIN,
+        $rawId,
+        $qty,
+        $section,
+        $desc,
+        $time,
+        $altsJson
+    );
+
+    // Для новых строк — ставим parentId отдельным вызовом
+    if ($rowId <= 0 && $savedMainId > 0) {
+        $newItem = $factoryRow->getItem($savedMainId);
+        if ($newItem) {
+            $newItem->set('UF_CRM_28_1752667276886', $headId);
+            $factoryRow->getUpdateOperation($newItem)->launch();
         }
     }
 
-    $validSteps[] = compact('rowId', 'rawId', 'qty', 'unit', 'section', 'desc', 'time', 'cleanAlts');
-
-    if ($rowId > 0) $incomingExistingIds[] = $rowId;
-}
-
-$incomingExistingIds = array_values(array_unique(array_filter($incomingExistingIds)));
-
-// ── Удаляем строки которых больше нет ────────────────────────────────────────
-$toDelete = array_diff($existingRowIds, $incomingExistingIds);
-$deleted  = [];
-
-foreach ($toDelete as $rid) {
-    $rid     = (int)$rid;
-    $rowItem = $factoryRow->getItem($rid);
-    if (!$rowItem) continue;
-
-    $parentId = (int)$rowItem->get('UF_CRM_28_1752667276886');
-    if ($parentId !== $headId) continue;
-
-    $resDel = $factoryRow->getDeleteOperation($rowItem)->launch();
-    if (!$resDel->isSuccess()) {
-        jsonOut(['ok' => false, 'error' => 'row_delete', 'rowId' => $rid, 'errors' => $resDel->getErrorMessages()], 400);
-    }
-    $deleted[] = $rid;
-}
-
-// ── Обновляем / создаём строки ────────────────────────────────────────────────
-$updated = [];
-$created = [];
-$keepIds = [];
-
-foreach ($validSteps as $s) {
-    $rowId    = (int)$s['rowId'];
-    $altsJson = Json::encode($s['cleanAlts'], JSON_UNESCAPED_UNICODE);
-
-    if ($rowId > 0) {
-        if (!isset($existingRowIdSet[$rowId])) continue;
-
-        $rowItem = $factoryRow->getItem($rowId);
-        if (!$rowItem) {
-            jsonOut(['ok' => false, 'error' => 'row_not_found', 'rowId' => $rowId], 404);
-        }
-
-        $rowTitle = $s['desc'] !== '' ? mb_substr($s['desc'], 0, 60) : ('Материал ID=' . $s['rawId']);
-
-        $rowItem->setTitle($rowTitle);
-        $rowItem->set('UF_CRM_28_1751274644',   (string)$s['rawId']);
-        $rowItem->set('UF_CRM_28_1751274777',   $s['qty']);
-        $rowItem->set('UF_CRM_28_1752667325075', $s['unit']);
-        $rowItem->set('UF_CRM_28_1773394604',   $s['section'] > 0 ? $s['section'] : null);
-        $rowItem->set('UF_CRM_28_1773394725',   $s['desc']);
-        $rowItem->set('UF_CRM_28_1773394804',   $s['time']);
-        $rowItem->set('UF_CRM_28_1773394825',   $altsJson);
-
-        $resUpd = $factoryRow->getUpdateOperation($rowItem)->launch();
-        if (!$resUpd->isSuccess()) {
-            jsonOut(['ok' => false, 'error' => 'row_update', 'rowId' => $rowId, 'errors' => $resUpd->getErrorMessages()], 400);
-        }
-
-        $updated[] = $rowId;
-        $keepIds[] = $rowId;
-        continue;
-    }
-
-    // Новая строка
-    $rowTitle = $s['desc'] !== '' ? mb_substr($s['desc'], 0, 60) : ('Материал ID=' . $s['rawId']);
-
-    $rowItem = $factoryRow->createItem();
-    $rowItem->setTitle($rowTitle);
-    $rowItem->set('UF_CRM_28_1752667276886',  $headId);
-    $rowItem->set('UF_CRM_28_1751274644',     (string)$s['rawId']);
-    $rowItem->set('UF_CRM_28_1751274777',     $s['qty']);
-    $rowItem->set('UF_CRM_28_1752667325075',  $s['unit']);
-    $rowItem->set('UF_CRM_28_1773394604',    $s['section'] > 0 ? $s['section'] : null);
-    $rowItem->set('UF_CRM_28_1773394725',    $s['desc']);
-    $rowItem->set('UF_CRM_28_1773394804',    $s['time']);
-    $rowItem->set('UF_CRM_28_1773394825',    $altsJson);
-
-    $resAdd = $factoryRow->getAddOperation($rowItem)->launch();
-    if (!$resAdd->isSuccess()) {
-        jsonOut(['ok' => false, 'error' => 'row_create', 'errors' => $resAdd->getErrorMessages()], 400);
-    }
-
-    $newId = (int)$rowItem->getId();
-    if ($newId > 0) {
-        $created[] = $newId;
-        $keepIds[] = $newId;
-    }
+    if ($savedMainId > 0) $finalMainIds[] = $savedMainId;
 }
 
 // ── Обновляем head ────────────────────────────────────────────────────────────
-$finalRowIds = array_values(array_unique(array_filter(array_map('intval', $keepIds))));
-
 $head->setTitle($title);
-$head->set('UF_CRM_27_1752661803131', [$specId]);
-$head->set('UF_CRM_27_1751274867', $finalRowIds);
-$head->set('UF_SWITCH_ACTIVE', Json::encode(['id' => $headId, 'active' => $activeNow], JSON_UNESCAPED_UNICODE));
+$head->set('UF_CRM_27_1751274867', $finalMainIds);
 
 $resHead = $factoryHead->getUpdateOperation($head)->launch();
 if (!$resHead->isSuccess()) {
-    jsonOut(['ok' => false, 'error' => 'head_update', 'headId' => $headId, 'errors' => $resHead->getErrorMessages()], 400);
+    jsonOut(['ok' => false, 'error' => 'head_update', 'errors' => $resHead->getErrorMessages()], 400);
 }
 
 jsonOut([
-    'ok'      => true,
-    'headId'  => $headId,
-    'rowIds'  => $finalRowIds,
-    'deleted' => $deleted,
-    'updated' => $updated,
-    'created' => $created,
+    'ok'     => true,
+    'headId' => $headId,
+    'rowIds' => $finalMainIds,
 ]);

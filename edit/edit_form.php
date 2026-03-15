@@ -1,9 +1,6 @@
 <?php
 /**
  * /local/specifications/edit/edit_form.php
- * Редактор спецификаций — новый интерфейс.
- * Левая панель: все head-элементы смарта 1142.
- * Правая панель: этапы выбранной спецификации.
  */
 
 use Bitrix\Main\Loader;
@@ -21,26 +18,12 @@ Loader::includeModule('ui');
 Loader::includeModule('iblock');
 Loader::includeModule('crm');
 
-Extension::load(['main.core', 'ui.notification', 'ui.buttons', 'ui.alerts']);
+Extension::load(['main.core', 'ui.notification', 'ui.buttons']);
 
 global $APPLICATION;
 
-// ── Единицы измерения из каталога ─────────────────────────────────────────────
-$units = [['id' => '', 'name' => '— ед. изм. —']];
-if (Loader::includeModule('catalog')) {
-    $rows = MeasureTable::getList([
-        'select' => ['ID', 'SYMBOL', 'MEASURE_TITLE'],
-        'order'  => ['ID' => 'ASC'],
-    ])->fetchAll();
-    foreach ($rows as $m) {
-        $label = trim((string)($m['SYMBOL'] ?: $m['MEASURE_TITLE']));
-        if ($label === '') $label = 'ID=' . (int)$m['ID'];
-        $units[] = ['id' => (int)$m['ID'], 'name' => $label];
-    }
-}
-
 // ── Участки из инфоблока 26 ───────────────────────────────────────────────────
-$sections = [];
+$workSections = [];
 $rsSec = \CIBlockElement::GetList(
     ['SORT' => 'ASC', 'NAME' => 'ASC'],
     ['IBLOCK_ID' => 26, 'ACTIVE' => 'Y'],
@@ -49,75 +32,24 @@ $rsSec = \CIBlockElement::GetList(
     ['ID', 'NAME']
 );
 while ($sec = $rsSec->Fetch()) {
-    $sections[] = ['id' => (int)$sec['ID'], 'name' => $sec['NAME']];
+    $workSections[] = ['id' => (int)$sec['ID'], 'name' => $sec['NAME']];
 }
 
-// ── Загружаем все head-элементы смарта 1142 ───────────────────────────────────
-$catalog = []; // [{headId, title, productId, productName, folder, stepsCount, active}]
-
+// ── Каталог: все head-элементы смарта 1142 ────────────────────────────────────
+$catalog = [];
 $factoryHead = Container::getInstance()->getFactory(1142);
-$factoryRow  = Container::getInstance()->getFactory(1146);
 
 if ($factoryHead) {
     $heads = $factoryHead->getItems([
         'select' => [
             'ID', 'TITLE',
-            'UF_CRM_27_1749727214', // ID товара инфоблока (Номенклатура)
-            'UF_CRM_27_1751274867', // Список строк 1146
-            'UF_CRM_27_1767865292', // Активный
+            'UF_CRM_27_1751274867', // строки 1146
+            'UF_CRM_27_1767865292', // активный
         ],
-        'order' => ['ID' => 'ASC'],
+        'order' => ['TITLE' => 'ASC'],
     ]);
 
-    // Собираем ID товаров для батч-загрузки
-    $productIds = [];
     foreach ($heads as $h) {
-        $pid = $h->get('UF_CRM_27_1749727214');
-        if (is_array($pid)) $pid = $pid[0] ?? 0;
-        $pid = (int)$pid;
-        if ($pid > 0) $productIds[] = $pid;
-    }
-    $productIds = array_unique($productIds);
-
-    // Загружаем названия и разделы товаров
-    $productNames   = [];
-    $productFolders = [];
-    $sectionNames   = [];
-
-    if (!empty($productIds)) {
-        // Разделы инфоблока 14
-        $rsSections = \CIBlockSection::GetList(
-            [],
-            ['IBLOCK_ID' => 14, 'ACTIVE' => 'Y'],
-            false,
-            ['ID', 'NAME']
-        );
-        while ($s = $rsSections->Fetch()) {
-            $sectionNames[(int)$s['ID']] = $s['NAME'];
-        }
-
-        // Товары
-        $rsProducts = \CIBlockElement::GetList(
-            [],
-            ['IBLOCK_ID' => 14, 'ID' => $productIds],
-            false,
-            false,
-            ['ID', 'NAME', 'IBLOCK_SECTION_ID']
-        );
-        while ($p = $rsProducts->Fetch()) {
-            $pid = (int)$p['ID'];
-            $productNames[$pid]   = $p['NAME'];
-            $secId = (int)$p['IBLOCK_SECTION_ID'];
-            $productFolders[$pid] = $sectionNames[$secId] ?? 'Без раздела';
-        }
-    }
-
-    // Формируем каталог
-    foreach ($heads as $h) {
-        $pid = $h->get('UF_CRM_27_1749727214');
-        if (is_array($pid)) $pid = $pid[0] ?? 0;
-        $pid = (int)$pid;
-
         $rowIds = $h->get('UF_CRM_27_1751274867');
         if (!is_array($rowIds)) $rowIds = $rowIds ? [$rowIds] : [];
         $stepsCount = count(array_filter(array_map('intval', $rowIds)));
@@ -127,13 +59,10 @@ if ($factoryHead) {
         $active = ((string)$activeVal === 'Y' || (int)$activeVal === 1) ? 1 : 0;
 
         $catalog[] = [
-            'headId'      => (int)$h->getId(),
-            'title'       => $h->getTitle(),
-            'productId'   => $pid,
-            'productName' => $productNames[$pid] ?? ('Товар #' . $pid),
-            'folder'      => $productFolders[$pid] ?? 'Без раздела',
-            'stepsCount'  => $stepsCount,
-            'active'      => $active,
+            'headId'     => (int)$h->getId(),
+            'title'      => $h->getTitle(),
+            'stepsCount' => $stepsCount,
+            'active'     => $active,
         ];
     }
 }
@@ -152,7 +81,7 @@ $APPLICATION->ShowHead();
 
 <div class="sf-layout">
 
-  <!-- ── Левая панель: каталог ── -->
+  <!-- ── Левая панель ── -->
   <div class="sf-sidebar">
     <div class="sf-sidebar-search">
       <input type="text" id="sf-search" placeholder="Поиск по названию..." autocomplete="off">
@@ -160,7 +89,7 @@ $APPLICATION->ShowHead();
     <div id="sf-catalog"></div>
   </div>
 
-  <!-- ── Правая панель: редактор ── -->
+  <!-- ── Правая панель ── -->
   <div class="sf-main">
     <div class="sf-main-header">
       <div id="sf-title">Выберите спецификацию из списка</div>
@@ -173,9 +102,8 @@ $APPLICATION->ShowHead();
       <table class="sf-table" id="sf-table">
         <thead>
           <tr>
-            <th style="width:260px;">Материал</th>
-            <th style="width:80px;">Кол-во</th>
-            <th style="width:100px;">Ед. изм.</th>
+            <th style="width:240px;">Материал</th>
+            <th style="width:120px;">Кол-во / Ед.</th>
             <th style="width:180px;">Участок</th>
             <th>Описание техпроцесса</th>
             <th style="width:90px;">Время (мин)</th>
@@ -186,9 +114,7 @@ $APPLICATION->ShowHead();
       </table>
     </div>
 
-    <button class="sf-btn sf-btn-dashed" id="sf-add-row" style="display:none;">
-      + Добавить этап
-    </button>
+    <button class="sf-btn sf-btn-dashed" id="sf-add-row" style="display:none;">+ Добавить этап</button>
 
     <div class="sf-footer" id="sf-footer" style="display:none;">
       <button class="sf-btn sf-btn-outline" id="sf-reset">Сбросить</button>
@@ -201,7 +127,7 @@ $APPLICATION->ShowHead();
 <div id="sf-tree-overlay" style="display:none;">
   <div id="sf-tree-box">
     <div id="sf-tree-header">
-      <h3>Выбор материала</h3>
+      <h3 id="sf-tree-title">Выбор материала</h3>
       <input type="text" id="sf-tree-search" placeholder="Поиск...">
       <button id="sf-tree-close">×</button>
     </div>
@@ -216,16 +142,15 @@ $APPLICATION->ShowHead();
   </div>
 </div>
 
-<!-- Данные для JS -->
 <script>
 var SF_DATA = {
-  sessid:   '<?= bitrix_sessid() ?>',
-  catalog:  <?= Json::encode($catalog,  JSON_UNESCAPED_UNICODE) ?>,
-  units:    <?= Json::encode($units,    JSON_UNESCAPED_UNICODE) ?>,
-  sections: <?= Json::encode($sections, JSON_UNESCAPED_UNICODE) ?>,
+  sessid:       '<?= bitrix_sessid() ?>',
+  catalog:      <?= Json::encode($catalog,      JSON_UNESCAPED_UNICODE) ?>,
+  workSections: <?= Json::encode($workSections, JSON_UNESCAPED_UNICODE) ?>,
   urls: {
     save:      '/local/specifications/edit/save_specification.php',
     materials: '/local/specifications/api/get_materials.php',
+    load:      '/local/specifications/api/get_specification.php',
   }
 };
 </script>
