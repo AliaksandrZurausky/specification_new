@@ -8,6 +8,7 @@
   var catalog      = D.catalog;
   var workSections = D.workSections;
 
+  var elWrap       = document.getElementById('sf-wrap');
   var currentHead  = null;
   var rowIdx       = 0;
   var isMassMode   = false;
@@ -77,7 +78,7 @@
       });
       this.classList.add('active');
 
-      document.body.classList.toggle('mass-mode', isMassMode);
+      elWrap.classList.toggle('mass-mode', isMassMode);
 
       if (isMassMode) {
         // Сбрасываем выбор, рендерим каталог с чекбоксами
@@ -680,17 +681,18 @@
   }
 
   // ── Старт ──────────────────────────────────────────────────────────────────
-  document.body.classList.add('sf-ready');
+
+  // Высота обёртки = доступное место под шапкой портала
+  function resizeWrap() {
+    elWrap.style.height = (window.innerHeight - elWrap.getBoundingClientRect().top) + 'px';
+  }
+  resizeWrap();
+  window.addEventListener('resize', resizeWrap);
+
+  elWrap.classList.add('sf-ready');
   renderCatalog();
 
   // Предзаполняем bulk-таблицу одной пустой строкой
   addBulkRow();
-
-  var qs  = new URLSearchParams(window.location.search);
-  var hid = parseInt(qs.get('headId'), 10) || 0;
-  if (hid > 0) {
-    var found = catalog.find(function (c) { return c.headId === hid; });
-    if (found) selectHead(found);
-  }
 
 })();

@@ -1,6 +1,8 @@
 /* /local/specifications/edit/edit_form.css */
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+.sf-page-wrap *, .sf-page-wrap *::before, .sf-page-wrap *::after { box-sizing: border-box; }
 
 :root {
   --indigo:  #6366f1;
@@ -18,16 +20,15 @@
   --r3:      8px;
 }
 
-body {
+.sf-page-wrap {
   font-family: 'Onest', -apple-system, BlinkMacSystemFont, sans-serif;
   background: #f5f3ff;
   color: var(--text);
-  height: 100vh;
   overflow: hidden;
   display: none;
   flex-direction: column;
 }
-body.sf-ready { display: flex; }
+.sf-page-wrap.sf-ready { display: flex; }
 
 /* ── Скроллбар ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -180,7 +181,7 @@ body.sf-ready { display: flex; }
   flex-shrink: 0;
   transition: background 0.15s, border-color 0.15s;
 }
-.mass-mode .check-box { display: flex; }
+.sf-page-wrap.mass-mode .check-box { display: flex; }
 .cat-item.selected .check-box {
   background: var(--indigo);
   border-color: var(--indigo);

@@ -7,17 +7,22 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Extension;
 use Bitrix\Main\Web\Json;
 use Bitrix\Crm\Service\Container;
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
-if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
+use Bitrix\Main\Page\Asset;
 
 define('BX_SESSION_ID_CHANGE', false);
+
+require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/header.php';
+/** @var CMain $APPLICATION */
+
+$APPLICATION->SetTitle('Спецификации');
 
 Loader::includeModule('ui');
 Loader::includeModule('iblock');
 Loader::includeModule('crm');
 
 Extension::load(['main.core', 'ui.notification', 'ui.buttons']);
+
+Asset::getInstance()->addCss('/local/specifications/edit/edit_form.css');
 
 global $APPLICATION;
 
@@ -66,20 +71,9 @@ if ($factoryHead) {
     }
 }
 
-$APPLICATION->ShowHead();
 ?>
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Спецификации</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/local/specifications/edit/edit_form.css?v=<?= time() ?>">
-</head>
-<body>
+
+<div class="sf-page-wrap" id="sf-wrap">
 
 <!-- ── Топбар ── -->
 <div class="topbar">
@@ -201,6 +195,8 @@ $APPLICATION->ShowHead();
 
 <div class="toast" id="sf-toast"></div>
 
+</div><!-- /sf-page-wrap -->
+
 <script>
 var SF_DATA = {
   sessid:       '<?= bitrix_sessid() ?>',
@@ -216,7 +212,4 @@ var SF_DATA = {
 </script>
 <script src="/local/specifications/edit/edit_form.js?v=<?= time() ?>"></script>
 
-</body>
-</html>
-<?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/epilog_after.php');
+<?php require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php'; ?>
