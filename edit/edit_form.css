@@ -147,7 +147,7 @@
 /* ── Лэйаут ──────────────────────────────────────────────────────────────── */
 .sf-layout {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: 320px 1fr;
   flex: 1;
   overflow: hidden;
   min-height: 0;
@@ -202,7 +202,7 @@
 }
 
 .cat-item {
-  padding: 10px 16px;
+  padding: 5px 16px;
   display: flex;
   align-items: center;
   gap: 10px;
