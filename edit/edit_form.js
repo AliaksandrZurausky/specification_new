@@ -32,6 +32,11 @@
   var elSave        = document.getElementById('sf-save');
   var elReset       = document.getElementById('sf-reset');
 
+  // Редактирование
+  var elEditFields    = document.getElementById('sf-edit-fields');
+  var elEditTitleInp  = document.getElementById('sf-edit-title-inp');
+  var elEditProduct   = document.getElementById('sf-edit-product');
+
   // Создание
   var elBtnAddSpec    = document.getElementById('sf-btn-add-spec');
   var elCreateFields  = document.getElementById('sf-create-fields');
@@ -245,6 +250,7 @@
     // Возвращаем нормальный вид
     elCreateFields.style.display = 'none';
     elCreateFooter.style.display = 'none';
+    elEditFields.style.display   = 'none';
     elTitle.style.display        = '';
     elTitle.textContent          = 'Выберите изделие из каталога';
     elAddRow.style.display       = 'none';
@@ -292,10 +298,12 @@
       if (idx !== -1) catalog.splice(idx, 1);
 
       var newEntry = {
-        headId:     data.headId,
-        title:      data.title || title,
-        stepsCount: data.stepsCount || 0,
-        active:     1,
+        headId:      data.headId,
+        title:       data.title || title,
+        stepsCount:  data.stepsCount || 0,
+        active:      1,
+        productId:   createSpecId,
+        productName: elCreateSpecBtn.classList.contains('has-value') ? elCreateSpecBtn.textContent : '',
       };
       catalog.push(newEntry);
       catalog.sort(function (a, b) { return a.title.localeCompare(b.title, 'ru'); });
@@ -304,7 +312,6 @@
       elBtnAddSpec.disabled = false;
       elCreateFields.style.display = 'none';
       elCreateFooter.style.display = 'none';
-      elTitle.style.display        = '';
 
       selectHead(newEntry);
       showToast('Спецификация создана ✓', 'ok');
@@ -323,7 +330,17 @@
   function selectHead(head) {
     currentHead = head;
     renderCatalog(elSearch.value);
-    elTitle.textContent = head.title;
+
+    // Показываем поля редактирования, скрываем placeholder и форму создания
+    elTitle.style.display        = 'none';
+    elCreateFields.style.display = 'none';
+    elCreateFooter.style.display = 'none';
+    elEditFields.style.display   = '';
+    elEditTitleInp.value         = head.title;
+    var prodName = head.productName || '';
+    elEditProduct.textContent    = prodName || '— товар не выбран —';
+    elEditProduct.title          = prodName;
+
     elTimeBadge.style.display = '';
     elAddRow.style.display    = '';
     elFooter.style.display    = '';
@@ -465,18 +482,21 @@
 
   elSave.addEventListener('click', function () {
     if (!currentHead) { showToast('Выберите спецификацию', 'err'); return; }
+    var newTitle = elEditTitleInp.value.trim();
+    if (!newTitle) { showToast('Введите название', 'err'); return; }
     var steps = collectSteps();
     elSave.disabled = true;
     elSave.textContent = 'Сохранение...';
 
     ajaxPost(D.urls.save, {
       headId: currentHead.headId,
-      title:  currentHead.title,
+      title:  newTitle,
       steps:  JSON.stringify(steps),
     }).then(function (data) {
       if (!data.ok) { showToast('Ошибка: ' + (data.error || ''), 'err'); return; }
       var cat = catalog.find(function (c) { return c.headId === currentHead.headId; });
-      if (cat) cat.stepsCount = data.rowIds.length;
+      if (cat) { cat.stepsCount = data.rowIds.length; cat.title = newTitle; }
+      currentHead.title = newTitle;
       renderCatalog(elSearch.value);
       showToast('Спецификация сохранена ✓', 'ok');
     }).catch(function () {

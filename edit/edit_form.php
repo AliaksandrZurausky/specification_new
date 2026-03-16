@@ -49,9 +49,33 @@ if ($factoryHead) {
             'ID', 'TITLE',
             'UF_CRM_27_1751274867',
             'UF_CRM_27_1767865292',
+            'UF_CRM_27_1752661803131',
         ],
         'order' => ['TITLE' => 'ASC'],
     ]);
+
+    // Собираем все ID товаров для batch-запроса в ИБ14
+    $specIdByHead = [];
+    foreach ($heads as $h) {
+        $specIdRaw = $h->get('UF_CRM_27_1752661803131');
+        if (is_array($specIdRaw)) $specIdRaw = $specIdRaw[0] ?? 0;
+        $specId = (int)$specIdRaw;
+        if ($specId > 0) $specIdByHead[(int)$h->getId()] = $specId;
+    }
+
+    $productNames = [];
+    if (!empty($specIdByHead)) {
+        $rsProd = \CIBlockElement::GetList(
+            [],
+            ['IBLOCK_ID' => 14, 'ID' => array_unique(array_values($specIdByHead))],
+            false,
+            false,
+            ['ID', 'NAME']
+        );
+        while ($prod = $rsProd->Fetch()) {
+            $productNames[(int)$prod['ID']] = $prod['NAME'];
+        }
+    }
 
     foreach ($heads as $h) {
         $rowIds = $h->get('UF_CRM_27_1751274867');
@@ -62,11 +86,16 @@ if ($factoryHead) {
         if (is_array($activeVal)) $activeVal = $activeVal[0] ?? null;
         $active = ((string)$activeVal === 'Y' || (int)$activeVal === 1) ? 1 : 0;
 
+        $hId    = (int)$h->getId();
+        $prodId = $specIdByHead[$hId] ?? 0;
+
         $catalog[] = [
-            'headId'     => (int)$h->getId(),
-            'title'      => $h->getTitle(),
-            'stepsCount' => $stepsCount,
-            'active'     => $active,
+            'headId'      => $hId,
+            'title'       => $h->getTitle(),
+            'stepsCount'  => $stepsCount,
+            'active'      => $active,
+            'productId'   => $prodId,
+            'productName' => $productNames[$prodId] ?? '',
         ];
     }
 }
@@ -105,6 +134,14 @@ if ($factoryHead) {
           <div id="sf-title" class="card-title">Выберите изделие из каталога</div>
           <div id="sf-time-badge" style="display:none;">
             Общее время: <strong id="sf-time-total">0</strong> мин
+          </div>
+        </div>
+
+        <!-- ── Поля редактирования (скрыты пока нет выбранной спецификации) ── -->
+        <div id="sf-edit-fields" style="display:none;">
+          <div class="sf-create-row">
+            <input type="text" id="sf-edit-title-inp" class="sf-create-title-inp" placeholder="Название спецификации">
+            <div id="sf-edit-product" class="sf-edit-product-display" title=""></div>
           </div>
         </div>
 
