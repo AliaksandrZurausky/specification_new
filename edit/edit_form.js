@@ -895,7 +895,7 @@
 
   // Высота обёртки = доступное место под шапкой портала
   function resizeWrap() {
-    elWrap.style.height = (window.innerHeight - elWrap.getBoundingClientRect().top) * 0.9 + 'px';
+    elWrap.style.height = (window.innerHeight - elWrap.getBoundingClientRect().top) * 0.8 + 'px';
   }
   resizeWrap();
   window.addEventListener('resize', resizeWrap);
