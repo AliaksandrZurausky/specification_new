@@ -7,13 +7,14 @@
  *
  * Структура steps[]:
  * {
- *   rowId: int (0=новый),
- *   rawId: int (ID товара ИБ14),
- *   qty:   float,
- *   section: int (ID элемента ИБ26),
- *   desc:  string,
- *   time:  int,
- *   alts: [{ rowId: int, rawId: int, qty: float }]
+ *   rowId:      int (0=новый),
+ *   rawId:      int (ID товара ИБ14),
+ *   qty:        float,
+ *   measureSym: string (единица измерения, напр. «шт», «м²»),
+ *   section:    int (ID элемента ИБ26),
+ *   desc:       string,
+ *   time:       int,
+ *   alts: [{ rowId: int, rawId: int, qty: float, measureSym: string }]
  * }
  */
 
@@ -27,8 +28,6 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
 define('BX_SESSION_ID_CHANGE', false);
 header('Content-Type: application/json; charset=utf-8');
 
-const TYPE_MAIN = 615;
-const TYPE_ALT  = 616;
 
 function jsonOut(array $data, int $status = 200): void
 {
@@ -80,20 +79,23 @@ function saveRow(
     int $type,
     int $rawId,
     float $qty,
+    string $measureSym,
     int $section,
     string $desc,
     int $time,
-    string $altsJson
+    string $altsJson,
+    string $mat = ''
 ): int
 {
     $isNew = $rowId <= 0;
     $item  = $isNew ? $factory->createItem() : $factory->getItem($rowId);
     if (!$item) return 0;
 
-    $itemTitle = $desc !== '' ? mb_substr($desc, 0, 60) : ('Материал #' . $rawId);
+    $itemTitle = $mat !== '' ? mb_substr($mat, 0, 60) : ('Материал #' . $rawId);
 
     $item->setTitle($itemTitle);
-    $item->set('UF_CRM_28_1752667325075', $type);          // тип: 615/616
+    $item->set('UF_CRM_28_1773398091',    $type);          // тип: 615=основной, 616=альтернатива
+    $item->set('UF_CRM_28_1752667325075', $measureSym);    // единица измерения (строка)
     $item->set('UF_CRM_28_1751274644',    (string)$rawId); // ID товара
     $item->set('UF_CRM_28_1751274777',    $qty);           // количество
     $item->set('UF_CRM_28_1773394604',    $section > 0 ? $section : null); // участок
@@ -156,13 +158,15 @@ foreach ($existingIds as $existId) {
 foreach ($incomingSteps as $step) {
     if (!is_array($step)) continue;
 
-    $rowId   = (int)($step['rowId']   ?? 0);
-    $rawId   = (int)($step['rawId']   ?? 0);
-    $qty     = (float)($step['qty']   ?? 0);
-    $section = (int)($step['section'] ?? 0);
-    $desc    = trim((string)($step['desc'] ?? ''));
-    $time    = (int)($step['time']    ?? 0);
-    $alts    = is_array($step['alts'] ?? null) ? $step['alts'] : [];
+    $rowId      = (int)($step['rowId']      ?? 0);
+    $rawId      = (int)($step['rawId']      ?? 0);
+    $mat        = trim((string)($step['mat']       ?? ''));
+    $qty        = (float)($step['qty']      ?? 0);
+    $measureSym = trim((string)($step['measureSym'] ?? ''));
+    $section    = (int)($step['section']    ?? 0);
+    $desc       = trim((string)($step['desc'] ?? ''));
+    $time       = (int)($step['time']       ?? 0);
+    $alts       = is_array($step['alts'] ?? null) ? $step['alts'] : [];
 
     if ($rawId <= 0) continue;
 
@@ -201,9 +205,11 @@ foreach ($incomingSteps as $step) {
     // Сохраняем/создаём альтернативы
     foreach ($alts as $alt) {
         if (!is_array($alt)) continue;
-        $altRowId = (int)($alt['rowId'] ?? 0);
-        $altRawId = (int)($alt['rawId'] ?? 0);
-        $altQty   = (float)($alt['qty'] ?? 0);
+        $altRowId      = (int)($alt['rowId']      ?? 0);
+        $altRawId      = (int)($alt['rawId']       ?? 0);
+        $altMat        = trim((string)($alt['mat']        ?? ''));
+        $altQty        = (float)($alt['qty']       ?? 0);
+        $altMeasureSym = trim((string)($alt['measureSym'] ?? ''));
 
         if ($altRawId <= 0) continue;
 
@@ -211,13 +217,15 @@ foreach ($incomingSteps as $step) {
             $factoryRow,
             $altRowId,
             $headId,
-            TYPE_ALT,
+            616, // тип: альтернатива
             $altRawId,
             $altQty,
+            $altMeasureSym,
             0,   // section у альтернативы не нужен
             '',  // desc у альтернативы не нужен
             0,   // time у альтернативы не нужен
-            '[]'
+            '[]',
+            $altMat
         );
 
         if ($savedAltId > 0) $altIds[] = $savedAltId;
@@ -230,13 +238,15 @@ foreach ($incomingSteps as $step) {
         $factoryRow,
         $rowId,
         $headId,
-        TYPE_MAIN,
+        615, // тип: основной
         $rawId,
         $qty,
+        $measureSym,
         $section,
         $desc,
         $time,
-        $altsJson
+        $altsJson,
+        $mat
     );
 
     // Для новых строк — ставим parentId отдельным вызовом

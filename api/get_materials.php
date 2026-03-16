@@ -9,7 +9,6 @@
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
-use Bitrix\Catalog\MeasureTable;
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
 if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
@@ -17,7 +16,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
 define('BX_SESSION_ID_CHANGE', false);
 header('Content-Type: application/json; charset=utf-8');
 
-const MAT_IBLOCK_ID = 14;
+if (!defined('MAT_IBLOCK_ID')) define('MAT_IBLOCK_ID', 14);
 
 function jsonOut(array $data, int $status = 200): void
 {
@@ -38,25 +37,84 @@ $action    = trim((string)($_POST['action'] ?? 'sections'));
 $sectionId = (int)($_POST['sectionId'] ?? 0);
 $query     = trim((string)($_POST['q'] ?? ''));
 
-// ── Единицы измерения ─────────────────────────────────────────────────────────
-$measuresMap = [];
-$measRows = MeasureTable::getList(['select' => ['ID', 'SYMBOL', 'MEASURE_TITLE']])->fetchAll();
-foreach ($measRows as $m) {
-    $sym = trim((string)($m['SYMBOL'] ?: $m['MEASURE_TITLE']));
-    $measuresMap[(int)$m['ID']] = $sym ?: ('ID=' . (int)$m['ID']);
+/**
+ * Единица измерения товара — адаптация _getProductUnit() из masterCard/api.php.
+ * Возвращает ['measureId' => int, 'measureSym' => string].
+ */
+function getProductUnitInfo(int $productId): array
+{
+    static $cache = [];
+    if (isset($cache[$productId])) return $cache[$productId];
+
+    if ($productId <= 0) {
+        return $cache[$productId] = ['measureId' => 0, 'measureSym' => ''];
+    }
+
+    $fetchUnit = function (int $id): array {
+        try {
+            $row = \Bitrix\Catalog\ProductTable::getCurrentRatioWithMeasure($id)[$id] ?? null;
+            $m = is_array($row) ? ($row['MEASURE'] ?? []) : [];
+            $sym = '';
+            if (!empty($m['SYMBOL_RUS']))    $sym = (string)$m['SYMBOL_RUS'];
+            elseif (!empty($m['SYMBOL_INTL']))   $sym = (string)$m['SYMBOL_INTL'];
+            elseif (!empty($m['MEASURE_TITLE'])) $sym = (string)$m['MEASURE_TITLE'];
+            return ['measureId' => (int)($m['ID'] ?? 0), 'measureSym' => trim($sym)];
+        } catch (\Throwable $e) {}
+        return ['measureId' => 0, 'measureSym' => ''];
+    };
+
+    $info     = $fetchUnit($productId);
+    $parentId = 0;
+
+    // offer → parent
+    if ($info['measureSym'] === '' || $info['measureSym'] === 'шт') {
+        $skuInfo  = \CCatalogSku::GetProductInfo($productId);
+        $parentId = (is_array($skuInfo) && !empty($skuInfo['ID'])) ? (int)$skuInfo['ID'] : 0;
+        if ($parentId > 0) {
+            $parentInfo = $fetchUnit($parentId);
+            if ($parentInfo['measureSym'] !== '') $info = $parentInfo;
+        }
+    }
+
+    // parent → first offer
+    if (($info['measureSym'] === '' || $info['measureSym'] === 'шт') && $parentId <= 0) {
+        try {
+            $offers = \CCatalogSKU::getOffersList([$productId], 0, ['ACTIVE' => 'Y'], ['ID'], []);
+            if (is_array($offers) && !empty($offers[$productId])) {
+                $offerIds = array_keys($offers[$productId]);
+                sort($offerIds, SORT_NUMERIC);
+                $firstOfferId = (int)reset($offerIds);
+                if ($firstOfferId > 0) {
+                    $offerInfo = $fetchUnit($firstOfferId);
+                    if ($offerInfo['measureSym'] !== '') $info = $offerInfo;
+                }
+            }
+        } catch (\Throwable $e) {}
+    }
+
+    return $cache[$productId] = $info;
 }
 
-function buildItems(\CIBlockResult $rs, array $measuresMap): array
+function buildItems(\CIBlockResult $rs): array
 {
-    $items = [];
+    $raw = [];
     while ($el = $rs->GetNext()) {
-        $measureId  = (int)($el['CATALOG_MEASURE'] ?? 0);
+        $raw[] = [
+            'id'        => (int)$el['ID'],
+            'name'      => (string)$el['NAME'],
+            'sectionId' => (int)$el['IBLOCK_SECTION_ID'],
+        ];
+    }
+
+    $items = [];
+    foreach ($raw as $el) {
+        $m = getProductUnitInfo($el['id']);
         $items[] = [
-            'id'         => (int)$el['ID'],
-            'name'       => (string)$el['NAME'],
-            'sectionId'  => (int)$el['IBLOCK_SECTION_ID'],
-            'measureId'  => $measureId,
-            'measureSym' => $measureId > 0 ? ($measuresMap[$measureId] ?? '') : '',
+            'id'         => $el['id'],
+            'name'       => $el['name'],
+            'sectionId'  => $el['sectionId'],
+            'measureId'  => $m['measureId'],
+            'measureSym' => $m['measureSym'],
         ];
     }
     return $items;
@@ -96,7 +154,7 @@ if ($action === 'items') {
         false,
         ['ID', 'NAME', 'IBLOCK_SECTION_ID', 'CATALOG_MEASURE']
     );
-    jsonOut(['ok' => true, 'items' => buildItems($rs, $measuresMap)]);
+    jsonOut(['ok' => true, 'items' => buildItems($rs)]);
 }
 
 // ── Поиск ─────────────────────────────────────────────────────────────────────
@@ -109,7 +167,7 @@ if ($action === 'search') {
         ['nTopCount' => 50],
         ['ID', 'NAME', 'IBLOCK_SECTION_ID', 'CATALOG_MEASURE']
     );
-    jsonOut(['ok' => true, 'items' => buildItems($rs, $measuresMap)]);
+    jsonOut(['ok' => true, 'items' => buildItems($rs)]);
 }
 
 jsonOut(['ok' => false, 'error' => 'unknown_action'], 400);

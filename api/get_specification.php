@@ -11,7 +11,6 @@
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Web\Json;
-use Bitrix\Catalog\MeasureTable;
 use Bitrix\Crm\Service\Container;
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
@@ -20,8 +19,6 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
 define('BX_SESSION_ID_CHANGE', false);
 header('Content-Type: application/json; charset=utf-8');
 
-const TYPE_MAIN = 615;
-const TYPE_ALT  = 616;
 
 function jsonOut(array $data, int $status = 200): void
 {
@@ -29,6 +26,66 @@ function jsonOut(array $data, int $status = 200): void
     echo Json::encode($data, JSON_UNESCAPED_UNICODE);
     die();
 }
+
+/**
+ * Единица измерения товара — адаптация _getProductUnit() из masterCard/api.php.
+ * Возвращает ['measureId' => int, 'measureSym' => string].
+ */
+function getProductUnitInfo(int $productId): array
+{
+    static $cache = [];
+    if (isset($cache[$productId])) return $cache[$productId];
+
+    if ($productId <= 0) {
+        return $cache[$productId] = ['measureId' => 0, 'measureSym' => ''];
+    }
+
+    $fetchUnit = function (int $id): array {
+        try {
+            $row = \Bitrix\Catalog\ProductTable::getCurrentRatioWithMeasure($id)[$id] ?? null;
+            $m = is_array($row) ? ($row['MEASURE'] ?? []) : [];
+            $sym = '';
+            if (!empty($m['SYMBOL_RUS']))    $sym = (string)$m['SYMBOL_RUS'];
+            elseif (!empty($m['SYMBOL_INTL']))   $sym = (string)$m['SYMBOL_INTL'];
+            elseif (!empty($m['MEASURE_TITLE'])) $sym = (string)$m['MEASURE_TITLE'];
+            return ['measureId' => (int)($m['ID'] ?? 0), 'measureSym' => trim($sym)];
+        } catch (\Throwable $e) {}
+        return ['measureId' => 0, 'measureSym' => ''];
+    };
+
+    $info     = $fetchUnit($productId);
+    $parentId = 0;
+
+    // offer → parent
+    if ($info['measureSym'] === '' || $info['measureSym'] === 'шт') {
+        $skuInfo  = \CCatalogSku::GetProductInfo($productId);
+        $parentId = (is_array($skuInfo) && !empty($skuInfo['ID'])) ? (int)$skuInfo['ID'] : 0;
+        if ($parentId > 0) {
+            $parentInfo = $fetchUnit($parentId);
+            if ($parentInfo['measureSym'] !== '') $info = $parentInfo;
+        }
+    }
+
+    // parent → first offer
+    if (($info['measureSym'] === '' || $info['measureSym'] === 'шт') && $parentId <= 0) {
+        try {
+            $offers = \CCatalogSKU::getOffersList([$productId], 0, ['ACTIVE' => 'Y'], ['ID'], []);
+            if (is_array($offers) && !empty($offers[$productId])) {
+                $offerIds = array_keys($offers[$productId]);
+                sort($offerIds, SORT_NUMERIC);
+                $firstOfferId = (int)reset($offerIds);
+                if ($firstOfferId > 0) {
+                    $offerInfo = $fetchUnit($firstOfferId);
+                    if ($offerInfo['measureSym'] !== '') $info = $offerInfo;
+                }
+            }
+        } catch (\Throwable $e) {}
+    }
+
+    return $cache[$productId] = $info;
+}
+
+try {
 
 if (!check_bitrix_sessid()) {
     jsonOut(['ok' => false, 'error' => 'sessid'], 403);
@@ -40,13 +97,6 @@ if (!Loader::includeModule('crm') || !Loader::includeModule('iblock') || !Loader
 
 $headId = (int)($_POST['headId'] ?? 0);
 if ($headId <= 0) jsonOut(['ok' => false, 'error' => 'headId'], 400);
-
-// ── Единицы измерения ─────────────────────────────────────────────────────────
-$measuresMap = [];
-foreach (MeasureTable::getList(['select' => ['ID', 'SYMBOL', 'MEASURE_TITLE']])->fetchAll() as $m) {
-    $sym = trim((string)($m['SYMBOL'] ?: $m['MEASURE_TITLE']));
-    $measuresMap[(int)$m['ID']] = $sym ?: ('ID=' . (int)$m['ID']);
-}
 
 // ── Фабрики ───────────────────────────────────────────────────────────────────
 $factoryHead = Container::getInstance()->getFactory(1142);
@@ -69,7 +119,8 @@ if (empty($rowIds)) {
 $allRows = $factoryRow->getItems([
     'select' => [
         'ID', 'TITLE',
-        'UF_CRM_28_1752667325075', // тип: 615/616
+        'UF_CRM_28_1773398091',    // тип: 615=основной, 616=альтернатива
+        'UF_CRM_28_1752667325075', // единица измерения (строка)
         'UF_CRM_28_1751274644',    // ID товара ИБ14
         'UF_CRM_28_1751274777',    // количество
         'UF_CRM_28_1773394604',    // участок ИБ26
@@ -96,14 +147,15 @@ if (!empty($productIds)) {
         ['IBLOCK_ID' => 14, 'ID' => $productIds],
         false,
         false,
-        ['ID', 'NAME', 'CATALOG_MEASURE']
+        ['ID', 'NAME']
     );
     while ($p = $rsProd->GetNext()) {
-        $mid = (int)($p['CATALOG_MEASURE'] ?? 0);
-        $productData[(int)$p['ID']] = [
+        $pid  = (int)$p['ID'];
+        $unit = getProductUnitInfo($pid);
+        $productData[$pid] = [
             'name'       => (string)$p['NAME'],
-            'measureId'  => $mid,
-            'measureSym' => $mid > 0 ? ($measuresMap[$mid] ?? '') : '',
+            'measureId'  => $unit['measureId'],
+            'measureSym' => $unit['measureSym'],
         ];
     }
 }
@@ -121,15 +173,19 @@ foreach ($rowIds as $rid) {
     $row = $rowsById[$rid] ?? null;
     if (!$row) continue;
 
-    $typeVal = $row->get('UF_CRM_28_1752667325075');
+    $typeVal = $row->get('UF_CRM_28_1773398091');
     if (is_array($typeVal)) $typeVal = $typeVal[0] ?? null;
     $type = (int)$typeVal;
 
-    // Пропускаем альтернативы на верхнем уровне
-    if ($type === TYPE_ALT) continue;
+    // Пропускаем альтернативы на верхнем уровне (на случай если ID попал не туда)
+    if ($type === 616) continue;
 
     $pid  = (int)$row->get('UF_CRM_28_1751274644');
     $prod = $productData[$pid] ?? ['name' => '', 'measureId' => 0, 'measureSym' => ''];
+
+    // Единица из сохранённого поля; если пусто или старое числовое значение (615/616) — fallback на каталог
+    $storedMSym = trim((string)$row->get('UF_CRM_28_1752667325075'));
+    $measureSym = ($storedMSym !== '' && !ctype_digit($storedMSym)) ? $storedMSym : $prod['measureSym'];
 
     $secRaw = $row->get('UF_CRM_28_1773394604');
     if (is_array($secRaw)) $secRaw = $secRaw[0] ?? 0;
@@ -160,26 +216,25 @@ foreach ($rowIds as $rid) {
 
         // Если товар ещё не загружен — грузим
         if (!$altProd && $altPid > 0) {
-            $rsSingle = \CIBlockElement::GetByID($altPid);
-            if ($el = $rsSingle->GetNextElement()) {
-                $f = $el->GetFields();
-                $mid = (int)($f['CATALOG_MEASURE'] ?? 0);
-                $altProd = [
-                    'name'       => (string)$f['NAME'],
-                    'measureId'  => $mid,
-                    'measureSym' => $mid > 0 ? ($measuresMap[$mid] ?? '') : '',
-                ];
-                $productData[$altPid] = $altProd;
-            }
+            $rsSingle = \CIBlockElement::GetList([], ['IBLOCK_ID' => 14, 'ID' => $altPid],
+                false, false, ['ID', 'NAME']);
+            $nameVal = '';
+            if ($elRow = $rsSingle->GetNext()) $nameVal = (string)$elRow['NAME'];
+            $unit    = getProductUnitInfo($altPid);
+            $altProd = ['name' => $nameVal, 'measureId' => $unit['measureId'], 'measureSym' => $unit['measureSym']];
+            $productData[$altPid] = $altProd;
         }
         $altProd = $altProd ?? ['name' => '', 'measureId' => 0, 'measureSym' => ''];
+
+        $altStoredMSym = trim((string)$altRow->get('UF_CRM_28_1752667325075'));
+        $altMeasureSym = ($altStoredMSym !== '' && !ctype_digit($altStoredMSym)) ? $altStoredMSym : ($altProd['measureSym'] ?? '');
 
         $alts[] = [
             'rowId'      => (int)$altRow->getId(),
             'rawId'      => $altPid,
             'mat'        => $altProd['name'],
             'measureId'  => $altProd['measureId'],
-            'measureSym' => $altProd['measureSym'],
+            'measureSym' => $altMeasureSym,
             'qty'        => (float)$altRow->get('UF_CRM_28_1751274777'),
         ];
     }
@@ -189,7 +244,7 @@ foreach ($rowIds as $rid) {
         'rawId'      => $pid,
         'mat'        => $prod['name'],
         'measureId'  => $prod['measureId'],
-        'measureSym' => $prod['measureSym'],
+        'measureSym' => $measureSym,
         'qty'        => (float)$row->get('UF_CRM_28_1751274777'),
         'section'    => (int)$secRaw,
         'desc'       => (string)$row->get('UF_CRM_28_1773394725'),
@@ -199,3 +254,13 @@ foreach ($rowIds as $rid) {
 }
 
 jsonOut(['ok' => true, 'title' => $head->getTitle(), 'steps' => $steps]);
+
+} catch (\Throwable $e) {
+    jsonOut([
+        'ok'    => false,
+        'error' => 'exception',
+        'msg'   => $e->getMessage(),
+        'file'  => basename($e->getFile()),
+        'line'  => $e->getLine(),
+    ], 500);
+}
