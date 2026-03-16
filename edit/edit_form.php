@@ -77,6 +77,7 @@ if ($factoryHead) {
 
 <!-- ── Топбар ── -->
 <div class="topbar">
+  <button class="btn btn-create" id="sf-btn-add-spec">+ Добавить спецификацию</button>
   <div class="nav-tabs">
     <div class="nav-tab active" data-tab="editor">Редактор изделия</div>
     <div class="nav-tab" data-tab="bulk">Массовое назначение</div>
@@ -107,6 +108,14 @@ if ($factoryHead) {
           </div>
         </div>
 
+        <!-- ── Поля создания (скрыты в режиме редактирования) ── -->
+        <div id="sf-create-fields" style="display:none;">
+          <div class="sf-create-row">
+            <input type="text" id="sf-create-title" class="sf-create-title-inp" value="Без названия" placeholder="Название спецификации">
+            <button type="button" id="sf-create-spec-btn" class="sf-mat-btn">+ Выбрать товар из каталога</button>
+          </div>
+        </div>
+
         <table class="spec-table">
           <thead>
             <tr>
@@ -128,6 +137,11 @@ if ($factoryHead) {
         <div class="card-footer" id="sf-footer" style="display:none;">
           <button class="btn btn-outline" id="sf-reset">Сбросить</button>
           <button class="btn btn-primary" id="sf-save">Сохранить изменения</button>
+        </div>
+
+        <div class="card-footer" id="sf-create-footer" style="display:none;">
+          <button class="btn btn-outline" id="sf-create-cancel">Отмена</button>
+          <button class="btn btn-create" id="sf-create-save">Создать спецификацию</button>
         </div>
       </div>
     </div>
@@ -204,6 +218,7 @@ var SF_DATA = {
   workSections: <?= Json::encode($workSections, JSON_UNESCAPED_UNICODE) ?>,
   urls: {
     save:      '/local/specifications/edit/save_specification.php',
+    create:    '/local/specifications/create/create_spec.php',
     materials: '/local/specifications/api/get_materials.php',
     load:      '/local/specifications/api/get_specification.php',
     applyBulk: '/local/specifications/edit/apply_bulk.php',

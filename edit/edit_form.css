@@ -30,6 +30,46 @@
 }
 .sf-page-wrap.sf-ready { display: flex; }
 
+/* ── Поля создания ───────────────────────────────────────────────────────── */
+#sf-create-fields {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.sf-create-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.sf-create-title-inp {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid rgba(120,110,200,0.25);
+  border-radius: var(--r3);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  background: rgba(255,255,255,0.9);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sf-create-title-inp:focus {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.08);
+}
+
+#sf-create-spec-btn {
+  flex-shrink: 0;
+  max-width: 260px;
+}
+
+/* ── Запись "новая" в каталоге ───────────────────────────────────────────── */
+.cat-item-new .cat-item-name { font-style: italic; color: var(--muted); }
+.badge-new { color: var(--emerald); font-weight: 600; }
+
 /* ── Скроллбар ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -550,6 +590,17 @@ textarea.t-inp { resize: none; }
   color: var(--indigo);
 }
 .btn-outline:hover:not(:disabled) { background: rgba(99,102,241,0.05); }
+
+.btn-create {
+  background: var(--emerald);
+  color: #fff;
+  white-space: nowrap;
+}
+.btn-create:hover:not(:disabled) {
+  background: #0da271;
+  box-shadow: 0 4px 14px rgba(16,185,129,0.3);
+}
+.btn-create:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .btn-dashed {
   width: 100%;

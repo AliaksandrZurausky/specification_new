@@ -14,6 +14,12 @@
   var isMassMode   = false;
   var selectedIds  = {};   // headId → true
 
+  // ── Режим создания ────────────────────────────────────────────────────────
+  var TEMP_HEAD_ID        = -1;
+  var isCreateMode        = false;
+  var createSpecId        = 0;
+  var createTitleAutoFilled = false;
+
   // ── DOM ──────────────────────────────────────────────────────────────────
   var elCatalog     = document.getElementById('sf-catalog');
   var elSearch      = document.getElementById('sf-search');
@@ -25,6 +31,15 @@
   var elFooter      = document.getElementById('sf-footer');
   var elSave        = document.getElementById('sf-save');
   var elReset       = document.getElementById('sf-reset');
+
+  // Создание
+  var elBtnAddSpec    = document.getElementById('sf-btn-add-spec');
+  var elCreateFields  = document.getElementById('sf-create-fields');
+  var elCreateTitle   = document.getElementById('sf-create-title');
+  var elCreateSpecBtn = document.getElementById('sf-create-spec-btn');
+  var elCreateFooter  = document.getElementById('sf-create-footer');
+  var elCreateCancel  = document.getElementById('sf-create-cancel');
+  var elCreateSave    = document.getElementById('sf-create-save');
 
   var elBulkTbody   = document.getElementById('sf-bulk-tbody');
   var elBulkAddRow  = document.getElementById('sf-bulk-add-row');
@@ -109,21 +124,39 @@
 
     var html = '';
     list.forEach(function (c) {
-      var isActive   = !isMassMode && currentHead && currentHead.headId === c.headId;
+      var isTemp     = c.headId === TEMP_HEAD_ID;
+      var isActive   = !isMassMode && (
+        isTemp
+          ? (isCreateMode && !currentHead)
+          : (currentHead && currentHead.headId === c.headId)
+      );
       var isSelected = isMassMode && !!selectedIds[c.headId];
-      var cls = 'cat-item' + (isActive ? ' active' : '') + (isSelected ? ' selected' : '');
+      var cls = 'cat-item'
+        + (isActive   ? ' active'       : '')
+        + (isSelected ? ' selected'     : '')
+        + (isTemp     ? ' cat-item-new' : '');
 
-      html += '<div class="' + cls + '" data-head-id="' + c.headId + '">'
-        + '<div class="check-box"></div>'
-        + '<div class="cat-item-info">'
-        +   '<div class="cat-item-name">' + esc(c.title) + '</div>'
-        +   '<div class="cat-item-meta">'
-        +     '<span>' + c.stepsCount + ' эт.</span>'
-        +     '<span class="' + (c.active ? 'badge-active' : 'badge-inactive') + '">'
-        +       (c.active ? '● Актив.' : '● Неактив.') + '</span>'
-        +   '</div>'
-        + '</div>'
-        + '</div>';
+      if (isTemp) {
+        html += '<div class="' + cls + '" data-head-id="' + c.headId + '">'
+          + '<div class="check-box"></div>'
+          + '<div class="cat-item-info">'
+          +   '<div class="cat-item-name">' + esc(c.title || 'Без названия') + '</div>'
+          +   '<div class="cat-item-meta"><span class="badge-new">● Новая</span></div>'
+          + '</div>'
+          + '</div>';
+      } else {
+        html += '<div class="' + cls + '" data-head-id="' + c.headId + '">'
+          + '<div class="check-box"></div>'
+          + '<div class="cat-item-info">'
+          +   '<div class="cat-item-name">' + esc(c.title) + '</div>'
+          +   '<div class="cat-item-meta">'
+          +     '<span>' + c.stepsCount + ' эт.</span>'
+          +     '<span class="' + (c.active ? 'badge-active' : 'badge-inactive') + '">'
+          +       (c.active ? '● Актив.' : '● Неактив.') + '</span>'
+          +   '</div>'
+          + '</div>'
+          + '</div>';
+      }
     });
     elCatalog.innerHTML = html;
   }
@@ -144,12 +177,147 @@
       }
       elSelCount.textContent = Object.keys(selectedIds).length;
       renderCatalog(elSearch.value);
+    } else if (headId === TEMP_HEAD_ID) {
+      // Возврат к форме создания
+      showCreatePane();
+      renderCatalog(elSearch.value);
     } else {
+      if (!found) return;
+      // Если мы в режиме создания — скрываем форму создания, но не выходим из режима
+      if (isCreateMode) {
+        elCreateFields.style.display  = 'none';
+        elCreateFooter.style.display  = 'none';
+        elTitle.style.display         = '';
+        elAddRow.style.display        = 'none';
+        elFooter.style.display        = 'none';
+        elTimeBadge.style.display     = 'none';
+      }
       selectHead(found);
     }
   });
 
   elSearch.addEventListener('input', function () { renderCatalog(this.value); });
+
+  // ── Создание новой спецификации ───────────────────────────────────────────
+
+  elBtnAddSpec.addEventListener('click', function () { enterCreateMode(); });
+
+  function enterCreateMode() {
+    isCreateMode          = true;
+    createSpecId          = 0;
+    createTitleAutoFilled = false;
+    elBtnAddSpec.disabled = true;
+
+    // Добавляем временную запись в начало каталога
+    catalog.unshift({ headId: TEMP_HEAD_ID, title: 'Без названия', stepsCount: 0, active: 1 });
+
+    // Переключаемся на вкладку редактора, если нужно
+    if (isMassMode) {
+      document.querySelector('.nav-tab[data-tab="editor"]').click();
+    }
+
+    showCreatePane();
+    renderCatalog(elSearch.value);
+  }
+
+  function showCreatePane() {
+    currentHead = null;
+    elCreateTitle.value           = elCreateTitle.value || 'Без названия';
+    elTitle.style.display         = 'none';
+    elTimeBadge.style.display     = 'none';
+    elCreateFields.style.display  = '';
+    elTbody.innerHTML             = '';
+    elAddRow.style.display        = '';
+    elFooter.style.display        = 'none';
+    elCreateFooter.style.display  = '';
+  }
+
+  function exitCreateMode() {
+    isCreateMode          = false;
+    createSpecId          = 0;
+    createTitleAutoFilled = false;
+    elBtnAddSpec.disabled = false;
+
+    // Удаляем временную запись из каталога
+    var idx = catalog.findIndex(function (c) { return c.headId === TEMP_HEAD_ID; });
+    if (idx !== -1) catalog.splice(idx, 1);
+
+    // Возвращаем нормальный вид
+    elCreateFields.style.display = 'none';
+    elCreateFooter.style.display = 'none';
+    elTitle.style.display        = '';
+    elTitle.textContent          = 'Выберите изделие из каталога';
+    elAddRow.style.display       = 'none';
+    elTbody.innerHTML            = '';
+    elTimeBadge.style.display    = 'none';
+
+    renderCatalog(elSearch.value);
+  }
+
+  // Синхронизация названия временной записи при вводе
+  elCreateTitle.addEventListener('input', function () {
+    createTitleAutoFilled = false;
+    var tempEntry = catalog.find(function (c) { return c.headId === TEMP_HEAD_ID; });
+    if (tempEntry) {
+      tempEntry.title = this.value.trim() || 'Без названия';
+      renderCatalog(elSearch.value);
+    }
+  });
+
+  // Кнопка отмены создания
+  elCreateCancel.addEventListener('click', function () {
+    elTbody.innerHTML = '';
+    exitCreateMode();
+  });
+
+  // Кнопка сохранения создания
+  elCreateSave.addEventListener('click', function () {
+    var title = elCreateTitle.value.trim();
+    if (!title)        { showToast('Введите название спецификации', 'err'); return; }
+    if (!createSpecId) { showToast('Выберите товар из каталога', 'err'); return; }
+
+    var steps = collectSteps();
+    elCreateSave.disabled    = true;
+    elCreateSave.textContent = 'Создание...';
+
+    ajaxPost(D.urls.create, {
+      title:  title,
+      specId: createSpecId,
+      steps:  JSON.stringify(steps),
+    }).then(function (data) {
+      if (!data.ok) { showToast('Ошибка: ' + (data.error || ''), 'err'); return; }
+
+      // Убираем временную запись, добавляем реальную
+      var idx = catalog.findIndex(function (c) { return c.headId === TEMP_HEAD_ID; });
+      if (idx !== -1) catalog.splice(idx, 1);
+
+      var newEntry = {
+        headId:     data.headId,
+        title:      data.title || title,
+        stepsCount: data.stepsCount || 0,
+        active:     1,
+      };
+      catalog.push(newEntry);
+      catalog.sort(function (a, b) { return a.title.localeCompare(b.title, 'ru'); });
+
+      isCreateMode          = false;
+      elBtnAddSpec.disabled = false;
+      elCreateFields.style.display = 'none';
+      elCreateFooter.style.display = 'none';
+      elTitle.style.display        = '';
+
+      selectHead(newEntry);
+      showToast('Спецификация создана ✓', 'ok');
+    }).catch(function () {
+      showToast('Ошибка AJAX', 'err');
+    }).finally(function () {
+      elCreateSave.disabled    = false;
+      elCreateSave.textContent = 'Создать спецификацию';
+    });
+  });
+
+  // Кнопка выбора товара (для спецификации, режим 'spec' дерева)
+  elCreateSpecBtn.addEventListener('click', function () { openTreeForSpec(); });
 
   // ── Выбор спецификации (одиночный режим) ──────────────────────────────────
   function selectHead(head) {
@@ -500,6 +668,12 @@
     _openTreeModal('Выбор материала (альтернатива)');
   }
 
+  function openTreeForSpec() {
+    treeTargetRow = null; treeTargetAlt = null;
+    treeMode = 'spec';
+    _openTreeModal('Выбор товара для спецификации');
+  }
+
   function _openTreeModal(title) {
     treeSelectedId = 0; treeSelectedName = ''; treeSelectedMId = 0; treeSelectedMSym = '';
     treeExpanded = { 0: true }; treeActiveSec = 0;
@@ -521,6 +695,23 @@
 
   elTreeSelect.addEventListener('click', function () {
     if (!treeSelectedId) { showToast('Выберите материал', 'err'); return; }
+
+    // Режим выбора товара для спецификации
+    if (treeMode === 'spec') {
+      createSpecId = treeSelectedId;
+      elCreateSpecBtn.textContent = treeSelectedName;
+      elCreateSpecBtn.title       = treeSelectedName;
+      elCreateSpecBtn.classList.add('has-value');
+      // Автозаполнение названия, если оно ещё не редактировалось вручную
+      if (elCreateTitle.value === 'Без названия' || createTitleAutoFilled) {
+        elCreateTitle.value   = treeSelectedName;
+        createTitleAutoFilled = true;
+        var tempEntry = catalog.find(function (c) { return c.headId === TEMP_HEAD_ID; });
+        if (tempEntry) { tempEntry.title = treeSelectedName; renderCatalog(elSearch.value); }
+      }
+      closeTree();
+      return;
+    }
 
     if (treeMode === 'alt-existing' && treeTargetAlt) {
       // Обновляем материал в существующей alt-строке
